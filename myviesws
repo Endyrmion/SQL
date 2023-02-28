@@ -1,0 +1,15 @@
+CREATE VIEW AB_View AS
+SELECT A.InstrumentID, A.Currency, A.Price, A.InvestmentPriceCurrency, 
+       A.InvestmentPriceDate, A.InBC, A.CreateDate AS A_CreateDate, 
+       A.CreateUser AS A_CreateUser, A.UpdateDate AS A_UpdateDate, 
+       B.Id AS B_Id, B.Name, B.Type, B.Active, B.BcInvestmentID, 
+       B.LoadedPriceInBC, B.CreateDate AS B_CreateDate, B.CreateUser AS B_CreateUser
+FROM A
+INNER JOIN B ON A.InstrumentID = B.Id
+WHERE B.Active = 1 AND B.LoadedPriceInBC = 1;
+
+
+CREATE VIEW ABC_View AS
+SELECT AB_View.*, C.LastPrice, C.PriceCurrencyCode
+FROM AB_View
+INNER JOIN C ON AB_View.B_Id = C.Code;
