@@ -1,0 +1,76 @@
+CREATE PROCEDURE [dbo].[Compare_Prices_and_Send_Email]
+AS
+BEGIN
+    -- Declare variables for the comparison
+    DECLARE @InstrumentID INT
+    DECLARE @XPrice MONEY
+    DECLARE @YPrice MONEY
+    DECLARE @PriceDiff FLOAT
+    DECLARE @PercentDiff FLOAT
+
+    -- Declare variables for the email
+    DECLARE @EmailSubject VARCHAR(100)
+    DECLARE @EmailBody VARCHAR(MAX)
+    DECLARE @HighlightedData VARCHAR(MAX)
+    DECLARE @EmailRecipients VARCHAR(MAX) = 'example@email.com' -- Change this to the email address(es) you want to send the report to
+    
+    -- Get the data from the dbo.[X_Price_list] table
+    SELECT InstrumentID, Price
+    INTO #XPrices
+    FROM dbo.[X_Price_list]
+    WHERE CreateDate = CONVERT(DATE, GETDATE()) -- Only compare prices from today
+
+    -- Get the data from the dbo.[Y_Price_list] table in the DB1 database
+    SELECT Code, [Last Price]
+    INTO #YPrices
+    FROM DB1.dbo.[Y_Price_list]
+
+    -- Create a table to store the comparison results
+    CREATE TABLE #PriceComparison (
+        InstrumentID INT,
+        XPrice MONEY,
+        YPrice MONEY,
+        PriceDiff FLOAT,
+        PercentDiff FLOAT
+    )
+
+    -- Loop through the #XPrices table and compare each price to the corresponding price in the #YPrices table
+    WHILE EXISTS(SELECT 1 FROM #XPrices)
+    BEGIN
+        SELECT TOP 1 @InstrumentID = InstrumentID, @XPrice = Price FROM #XPrices
+
+        SELECT TOP 1 @YPrice = [Last Price] FROM #YPrices WHERE Code = @InstrumentID
+
+        IF @YPrice IS NOT NULL -- Only compare if there is a corresponding price in the #YPrices table
+        BEGIN
+            SET @PriceDiff = @XPrice - @YPrice
+            SET @PercentDiff = @PriceDiff / @XPrice * 100
+
+            INSERT INTO #PriceComparison (InstrumentID, XPrice, YPrice, PriceDiff, PercentDiff)
+            VALUES (@InstrumentID, @XPrice, @YPrice, @PriceDiff, @PercentDiff)
+        END
+
+        DELETE FROM #XPrices WHERE InstrumentID = @InstrumentID
+    END
+
+    -- Build the email body
+    SET @EmailSubject = 'Daily Price Comparison Report'
+    SET @EmailBody = 'Attached is the daily price comparison report between dbo.[X_Price_list] and dbo.[Y_Price_list].'
+
+    IF EXISTS(SELECT 1 FROM #PriceComparison WHERE ABS(PercentDiff) > 10)
+    BEGIN
+        SET @HighlightedData = 'The following prices have changed by more than 10%:' + CHAR(13) + CHAR(10)
+
+        SELECT @HighlightedData = @HighlightedData + 'InstrumentID: ' + CONVERT(VARCHAR(10), InstrumentID) + ', XPrice: ' + CONVERT(VARCHAR(20), XPrice) + ', YPrice: ' + CONVERT(VARCHAR(20), YPrice) + CHAR(13) + CHAR(10)
+        FROM #PriceComparison
+        WHERE ABS(PercentDiff) > 10
+        ORDER BY ABS(PercentDiff) DESC
+
+        SET @EmailBody = @HighlightedData + CHAR(13) + CHAR(10) + @EmailBody
+    END
+
+    -- Send the email
+    EXEC msdb.dbo.sp_send_dbmail
+        @profile_name = 'Default',
+        @recipients = @EmailRecipients,
+        @subject = @EmailSubject
